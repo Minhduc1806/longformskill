@@ -30,6 +30,10 @@ Báo cáo tự nghiên cứu dạng **article HTML dài** — 15-40 chương, da
 
 ## Điều kiện tiên quyết
 
+### Skill ≠ slash command
+
+Skill này có thể được gọi bằng yêu cầu tự nhiên như “dùng skill longform report để viết…”. Đừng hứa `/longform-report` hoạt động chỉ vì skill tồn tại. Slash command là lớp UI/runtime riêng, chỉ chạy nếu command đó có trong `/commands`. Nếu user gặp `Unknown command /longform-report`, giải thích: command wrapper chưa đăng ký; gửi prompt không có slash vẫn dùng được skill.
+
 Không phụ thuộc skill khác. Input cần:
 - **Chủ đề** bài (VD: "BĐS dòng tiền", "Thị trường chứng khoán TQ 2015", "Giáo dục đại học TQ").
 - **Số chương** dự kiến + **dàn ý** sơ bộ (user cung cấp hoặc brainstorm cùng AI).
@@ -477,6 +481,15 @@ for sid,body in re.findall(r'<section id=\"([^\"]+)\"[^>]*>(.*?)</section>', htm
 ❌ Mở file không có mạng → chart trống, KHÔNG có lỗi console (im lặng fail).
 ✅ Bài quan trọng → download `chart.umd.min.js` local, đổi `<script src>` thành relative path. Hoặc thêm `<noscript>` fallback text "Cần kết nối mạng để hiển thị chart".
 
+### Pitfall 2b — `MEDIA:` hiện thành text, không có file trên Telegram
+
+❌ Chỉ ghi `MEDIA:/absolute/path/report.html` trong final response. Ở một số gateway/runtime, final được stream như text nên directive không được parser thành document attachment.
+✅ Khi user yêu cầu gửi file ngay trong Telegram chat: copy file vào `/root/.hermes/cache/documents/`, verify `validate_media_delivery_path(path)`, rồi gửi thật qua CLI:
+```bash
+hermes send --to telegram:<chat_id> --json 'MEDIA:/root/.hermes/cache/documents/report.html'
+```
+Chỉ báo thành công sau khi JSON trả `success: true` + `message_id`. Dùng `hermes send --list telegram` khi cần xác định target. Final message chỉ nên xác nhận file/document đã gửi, không thay thế lệnh gửi.
+
 ### Pitfall 3 — Presentation `SLIDES` không đồng bộ section
 
 ❌ Thêm/bớt section nhưng quên update `SLIDES[]` → trình chiếu thiếu/thừa slide, hoặc slide trỏ section đã xóa.
@@ -498,6 +511,25 @@ grep -c '<section ' {project}/{slug}/index.html        # số section
 
 ❌ Thêm/xóa `<li>` trong group nhưng quên update `<span class="gcount">N</span>` → badge số sai.
 ✅ Verify: `gcount` = số `<li>` trong group đó.
+
+### Pitfall 5b — QA thủ công bằng đọc file có thể tạo false negative
+
+❌ Dùng tool đọc file có line-number prefix rồi nối lại để check `progressBar.style.width`, `SLIDES`, placeholder... → có thể báo sai vì nội dung bị biến đổi; hoặc flag `}}` trong CSS/JS object là placeholder dù hợp lệ.
+✅ QA đáng tin: đọc raw file trực tiếp, rồi mở bằng browser/file URL và kiểm console/DOM. Placeholder chỉ fail khi match token template như `{{[A-Z_0-9]+}}`, không fail mọi `}}`.
+
+Checklist QA tối thiểu cho output HTML:
+- `section[id^="chuong-"]` = số chương user yêu cầu.
+- `<canvas>` count = `new Chart(` count.
+- Browser DOM có `#minimap`, `#progressBar`, `#presOverlay`.
+- Browser console không có JS error.
+- Anchor nội bộ `href="#..."` đều có target id.
+- Hero/meta chart count phải khớp chart thực tế, nếu ghi trong meta.
+
+### Pitfall 5c — Slide rỗng dù bài đọc đủ chương
+
+Khi tạo `SLIDES` từ Markdown, bỏ comment/slot chart trước rồi lấy đoạn `<p>` có nội dung; không lấy máy móc phần tử đầu của `split('\n\n')`, vì chương mở đầu bằng comment/chart có thể sinh slide rỗng. Kiểm tra mọi slide chương có nội dung thực, không chỉ đếm slide hoặc thử nút Next. Kiểm tra đóng/mở lại phải reset cả chỉ số lẫn class `.active`. Khi rút gọn tiêu đề mục lục, tách `': '` thay vì `':'` để không làm mất phút trong timestamp `13:59`.
+
+Với mục lục tự ẩn ở hero, cuộn vào bài để mục lục hiện rồi mới click; chờ điều kiện vị trí đích thay vì sleep cố định cho smooth scroll. Nếu Node không resolve Playwright nhưng Python Playwright có sẵn, dùng Python browser QA tương đương hoặc package Node bundled của Python; không coi thiếu module Node là thiếu browser. Kiểm thử desktop, mobile và breakpoint trung gian để bắt mục lục đè bài. Phân biệt cảnh báo test chưa kích hoạt UI với lỗi chức năng thực, và lưu bằng chứng kiểm lại.
 
 ### Pitfall 6 — Mâu thuẫn số liệu nội bộ + sai nguồn
 
@@ -781,6 +813,12 @@ if (totalDangling > DANGLING_THRESHOLD) {
 **(3) Báo user minh bạch số dangling** trong QA report cuối (Global Atlas đã làm đúng — `QA-REPORT.md:100-104` liệt kê 4 nhóm + giải thích). **Pitfall 8 áp dụng**: không khẳng định "0 dangling" mà không verify.
 
 ---
+
+### Pitfall 6b — Broker report published before reviewed BCTC
+
+❌ CTCK phát hành report ~10/08/2026 dùng số trước soát xét 14/08 → bản soát xét cắt −119 tỷ LNTT H1 (TT99). Dự phóng LNST 2026 giữa các nhà chênh >40%. Dùng số chưa soát xét → giá trị bị sai ngay từ giả định.
+
+✅ Luôn check ngày in báo cáo CTCK vs ngày BCTC soát xét công bố. Khi reviewed BCTC có sẵn, lock model theo reviewed figures và show before/after revision table. Đối chiếu mọi TP broker với ngày in, không phải tên file.
 
 ## Tham khảo
 
